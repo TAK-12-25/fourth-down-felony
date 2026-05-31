@@ -1,0 +1,6 @@
+{
+  "framework": "vite",
+  "buildCommand": "cd \"AK Blitz\" && npm install && npm run build",
+  "outputDirectory": "AK Blitz/dist",
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+}
