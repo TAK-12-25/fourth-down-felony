@@ -1,88 +1,37 @@
 // ============================================================================
-// PlayerSystem.ts — spawns 3D player placeholders (capsule body + helmet box),
-// places formations, integrates arcade movement, syncs meshes, knockback.
+// PlayerSystem.ts — spawns chunky low-poly arcade football players (built by
+// PlayerModelFactory), places formations, integrates arcade movement, drives
+// procedural run/idle/stun animation, knockback. Logic is unchanged from the
+// capsule prototype — only the presentation got a major upgrade.
 // ============================================================================
 import type { Scene } from "@babylonjs/core/scene";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
-import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
-import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { PLAYER, FIELD } from "../config";
 import { TEAMS } from "../data/teams";
 import { getPlayer } from "../data/players";
 import { getOffensivePlay } from "../data/plays";
+import { createFootballPlayer, type PlayerModel } from "../rendering/PlayerModelFactory";
 import type { GameContext } from "../GameContext";
 import type { RuntimeEntity } from "../types/gameTypes";
 
-interface Rig {
-  root: TransformNode;
-  body: Mesh;
-  helmet: Mesh;
-  ring: Mesh; // selection / target ring
-  bob: number;
-  mat: StandardMaterial;
-}
-
 export class PlayerSystem {
   private scene: Scene;
-  private rigs = new Map<number, Rig>();
+  private rigs = new Map<number, PlayerModel>();
   private nextMeshId = 1;
 
   constructor(scene: Scene) {
     this.scene = scene;
   }
 
-  private makeRig(color: Color3, accent: Color3): Rig {
-    const root = new TransformNode("p" + this.nextMeshId, this.scene);
-    const body = MeshBuilder.CreateCapsule(
-      "body" + this.nextMeshId,
-      { height: PLAYER.HEIGHT, radius: PLAYER.RADIUS, tessellation: 10, capSubdivisions: 4 },
-      this.scene
-    );
-    const mat = new StandardMaterial("pm" + this.nextMeshId, this.scene);
-    mat.diffuseColor = color;
-    mat.specularColor = new Color3(0.1, 0.1, 0.1);
-    body.material = mat;
-    body.parent = root;
-    body.position.y = PLAYER.HEIGHT / 2;
-
-    const helmet = MeshBuilder.CreateBox(
-      "hel" + this.nextMeshId,
-      { width: 1.0, height: 0.7, depth: 1.1 },
-      this.scene
-    );
-    const hmat = new StandardMaterial("hm" + this.nextMeshId, this.scene);
-    hmat.diffuseColor = accent;
-    hmat.specularColor = new Color3(0.3, 0.3, 0.3);
-    helmet.material = hmat;
-    helmet.parent = root;
-    helmet.position.set(0, PLAYER.HEIGHT + 0.1, 0.15);
-
-    const ring = MeshBuilder.CreateTorus(
-      "ring" + this.nextMeshId,
-      { diameter: 2.6, thickness: 0.18, tessellation: 20 },
-      this.scene
-    );
-    const rmat = new StandardMaterial("rm" + this.nextMeshId, this.scene);
-    rmat.emissiveColor = new Color3(1, 0.85, 0.2);
-    rmat.diffuseColor = new Color3(1, 0.85, 0.2);
-    rmat.specularColor = new Color3(0, 0, 0);
-    ring.material = rmat;
-    ring.parent = root;
-    ring.position.y = 0.12;
-    ring.rotation.x = Math.PI / 2;
-    ring.setEnabled(false);
-
-    return { root, body, helmet, ring, bob: 0, mat };
-  }
-
-  rigOf(e: RuntimeEntity): Rig | undefined {
+  rigOf(e: RuntimeEntity): PlayerModel | undefined {
     return this.rigs.get(e.meshId);
   }
+  /** torso is the fire/particle emitter anchor used by EffectsSystem. */
   bodyMesh(e: RuntimeEntity): Mesh | undefined {
-    return this.rigs.get(e.meshId)?.body;
+    return this.rigs.get(e.meshId)?.torso;
   }
 
   /** Build both teams' on-field entities + meshes. */
@@ -93,12 +42,10 @@ export class PlayerSystem {
     const defense = TEAMS[ctx.defenseTeamId];
 
     offense.roster.forEach((pid, slot) => {
-      const e = this.makeEntity(getPlayer(pid).id, "offense", slot, ctx, Color3.FromHexString(offense.primary), Color3.FromHexString(offense.secondary));
-      ctx.entities.push(e);
+      ctx.entities.push(this.makeEntity(getPlayer(pid).id, "offense", slot, offense.primary, offense.secondary));
     });
     defense.roster.forEach((pid, slot) => {
-      const e = this.makeEntity(getPlayer(pid).id, "defense", slot, ctx, Color3.FromHexString(defense.primary), Color3.FromHexString(defense.secondary));
-      ctx.entities.push(e);
+      ctx.entities.push(this.makeEntity(getPlayer(pid).id, "defense", slot, defense.primary, defense.secondary));
     });
 
     this.positionFormation(ctx);
@@ -108,13 +55,15 @@ export class PlayerSystem {
     pid: string,
     side: "offense" | "defense",
     slot: number,
-    _ctx: GameContext,
-    color: Color3,
-    accent: Color3
+    primaryHex: string,
+    secondaryHex: string
   ): RuntimeEntity {
-    const rig = this.makeRig(color, accent);
+    const jersey = Color3.FromHexString(primaryHex);
+    const pants = Color3.FromHexString(secondaryHex);
+    const helmet = jersey.scale(0.78);
+    const model = createFootballPlayer(this.scene, jersey, pants, helmet);
     const meshId = this.nextMeshId++;
-    this.rigs.set(meshId, rig);
+    this.rigs.set(meshId, model);
     return {
       data: getPlayer(pid),
       side,
@@ -144,7 +93,6 @@ export class PlayerSystem {
     const off = ctx.entities.filter((e) => e.side === "offense");
     const def = ctx.entities.filter((e) => e.side === "defense");
 
-    // Offense: QB just behind LOS, others at formation x from their first route pt
     for (const e of off) {
       const a = play.assignments.find((x) => x.slot === e.slot);
       e.role = a?.role ?? "WR";
@@ -165,7 +113,6 @@ export class PlayerSystem {
       e.facing = 0;
     }
 
-    // Defense: mirror across LOS, simple spacing
     const defXs = [0, -8, 8, -4, 4];
     def.forEach((e, i) => {
       e.pos.set(defXs[i] ?? 0, PLAYER.Y, los + 3 + (i === 0 ? 0 : 2));
@@ -185,19 +132,16 @@ export class PlayerSystem {
       if (e.stunTimer > 0) {
         e.stunTimer -= dt;
         e.state = e.stunTimer > 0 ? "stunned" : "idle";
-        // friction while stunned (knockback slide)
         e.vel.scaleInPlace(Math.max(0, 1 - 6 * dt));
       }
       e.pos.addInPlace(e.vel.scale(dt));
 
-      // clamp to field width + a little past the end zones
       const hw = FIELD.HALF_W - PLAYER.RADIUS;
       if (e.pos.x > hw) { e.pos.x = hw; e.vel.x = 0; }
       if (e.pos.x < -hw) { e.pos.x = -hw; e.vel.x = 0; }
       if (e.pos.z < -FIELD.EZ) e.pos.z = -FIELD.EZ;
       if (e.pos.z > FIELD.LEN + FIELD.EZ) e.pos.z = FIELD.LEN + FIELD.EZ;
 
-      // facing follows velocity when moving
       const sp = Math.hypot(e.vel.x, e.vel.z);
       if (sp > 0.5 && e.stunTimer <= 0) {
         const target = Math.atan2(e.vel.x, e.vel.z);
@@ -209,49 +153,64 @@ export class PlayerSystem {
     }
   }
 
-  /** Copy entity transforms to meshes + running bob + selection rings. */
+  /** Copy transforms to meshes + procedural run/idle/stun animation + indicators. */
   syncMeshes(ctx: GameContext, dt: number, force = false) {
+    const now = performance.now() / 1000;
     for (const e of ctx.entities) {
-      const rig = this.rigs.get(e.meshId);
-      if (!rig) continue;
-      rig.root.position.set(e.pos.x, 0, e.pos.z);
-      rig.root.rotation.y = e.facing;
+      const m = this.rigs.get(e.meshId);
+      if (!m) continue;
+      m.root.position.set(e.pos.x, 0, e.pos.z);
+      m.root.rotation.y = e.facing;
 
       const sp = Math.hypot(e.vel.x, e.vel.z);
-      if (e.state === "stunned") {
-        rig.root.rotation.x = -0.7; // knocked back tilt
-        rig.bob = 0;
+      const downed = e.state === "stunned" || e.state === "down";
+
+      if (downed) {
+        // slump backward, splay the limbs — arcade "got trucked" pose
+        m.root.rotation.x = lerp(m.root.rotation.x, -1.15, Math.min(1, 12 * dt));
+        m.lHip.rotation.x = -0.9; m.rHip.rotation.x = 0.5;
+        m.lSh.rotation.x = -1.4; m.rSh.rotation.x = -1.1;
+        m.helmet.position.y = m.helmetBaseY;
       } else {
-        rig.root.rotation.x = 0;
-        if (sp > 1) {
-          rig.bob += dt * sp * 1.1;
-          rig.body.position.y = PLAYER.HEIGHT / 2 + Math.abs(Math.sin(rig.bob)) * 0.18;
-        } else {
-          rig.body.position.y = PLAYER.HEIGHT / 2;
-        }
+        m.root.rotation.x = lerp(m.root.rotation.x, sp > 1 ? 0.14 : 0, Math.min(1, 10 * dt));
+        const moving = sp > 1;
+        const rate = moving ? 2.2 + sp * 1.1 : 2.4;
+        m.bob += dt * rate;
+        const amp = moving ? Math.min(0.95, 0.3 + sp * 0.05) : 0.06;
+        const s = Math.sin(m.bob);
+        // legs and arms swing in opposition (contralateral gait)
+        m.lHip.rotation.x = s * amp;
+        m.rHip.rotation.x = -s * amp;
+        m.lSh.rotation.x = -s * amp * 0.9;
+        m.rSh.rotation.x = s * amp * 0.9;
+        // helmet bob (double-time)
+        m.helmet.position.y = m.helmetBaseY + Math.abs(Math.sin(m.bob)) * (moving ? 0.06 : 0.02);
       }
 
-      // selection ring on human-controlled offense or ball carrier
+      // ---- indicators ----
       const show = (e.isHuman && !force) || e.hasBall;
-      rig.ring.setEnabled(show);
+      m.ring.setEnabled(show);
+      m.arrow.setEnabled(show);
       if (show) {
-        const rmat = rig.ring.material as StandardMaterial;
-        if (e.hasBall) rmat.emissiveColor.set(1, 0.85, 0.2);
-        else rmat.emissiveColor.set(0.4, 0.9, 1);
+        const pulse = 1 + 0.1 * Math.sin(now * 6);
+        m.ring.scaling.set(pulse, pulse, 1);
+        m.arrow.position.y = 4.2 + 0.18 * Math.sin(now * 4);
+        const carrierCol = e.hasBall ? new Color3(1, 0.85, 0.2) : new Color3(0.4, 0.9, 1);
+        (m.ring.material as StandardMaterial).emissiveColor = carrierCol;
+        (m.arrow.material as StandardMaterial).emissiveColor = carrierCol;
       }
     }
   }
 
-  /** Knock an entity back along dir, stun them. */
   knockback(e: RuntimeEntity, dirX: number, dirZ: number, power: number, stun: number) {
-    const m = Math.hypot(dirX, dirZ) || 1;
-    e.vel.set((dirX / m) * power, 0, (dirZ / m) * power);
+    const mag = Math.hypot(dirX, dirZ) || 1;
+    e.vel.set((dirX / mag) * power, 0, (dirZ / mag) * power);
     e.stunTimer = Math.max(e.stunTimer, stun);
     e.state = "stunned";
   }
 
   dispose() {
-    for (const r of this.rigs.values()) r.root.dispose(false, true);
+    for (const m of this.rigs.values()) m.root.dispose(false, true);
     this.rigs.clear();
     this.nextMeshId = 1;
   }
@@ -262,4 +221,7 @@ function lerpAngle(a: number, b: number, t: number): number {
   while (d > Math.PI) d -= Math.PI * 2;
   while (d < -Math.PI) d += Math.PI * 2;
   return a + d * t;
+}
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
 }

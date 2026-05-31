@@ -1,6 +1,6 @@
 // ============================================================================
-// CameraSystem.ts — angled arcade chase cam. Follows focus point, shakes on
-// big hits, punches (quick zoom) on throws. Not a flat overhead cam.
+// CameraSystem.ts — low, angled arcade chase cam. Follows the focus point,
+// shakes on big hits, punches (quick zoom) on throws. Not a flat overhead cam.
 // ============================================================================
 import type { Scene } from "@babylonjs/core/scene";
 import { UniversalCamera } from "@babylonjs/core/Cameras/universalCamera";
@@ -24,7 +24,7 @@ export class CameraSystem {
   setFocusImmediate(x: number, z: number) {
     this.focus.set(x, 1, z);
     this.cam.position.set(x, CAMERA.HEIGHT, z - CAMERA.BACK);
-    this.cam.setTarget(new Vector3(x, 1, z + CAMERA.LOOK_AHEAD));
+    this.cam.setTarget(new Vector3(x, CAMERA.LOOK_Y, z + CAMERA.LOOK_AHEAD));
   }
 
   addShake(amount: number) { this.shake = Math.min(1.4, this.shake + amount); }
@@ -36,9 +36,9 @@ export class CameraSystem {
     this.focus.x += (targetX - this.focus.x) * k;
     this.focus.z += (targetZ - this.focus.z) * k;
 
-    // punch pulls camera in slightly (quick zoom), then relaxes
-    const back = CAMERA.BACK - this.punch * 6;
-    const height = CAMERA.HEIGHT - this.punch * 2;
+    // punch pulls the camera in slightly (quick zoom), then relaxes
+    const back = CAMERA.BACK - this.punch * 4;
+    const height = CAMERA.HEIGHT - this.punch * 1.2;
 
     let sx = 0, sy = 0;
     if (this.shake > 0.001) {
@@ -48,7 +48,7 @@ export class CameraSystem {
     }
 
     this.cam.position.set(this.focus.x + sx, height + sy, this.focus.z - back);
-    this.cam.setTarget(new Vector3(this.focus.x, 1.2, this.focus.z + CAMERA.LOOK_AHEAD));
+    this.cam.setTarget(new Vector3(this.focus.x, CAMERA.LOOK_Y, this.focus.z + CAMERA.LOOK_AHEAD));
 
     this.shake = Math.max(0, this.shake - CAMERA.SHAKE_DECAY * dt * this.shake - 0.01 * dt);
     if (this.shake < 0.002) this.shake = 0;

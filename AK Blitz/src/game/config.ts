@@ -15,7 +15,7 @@ export const FIELD = {
 export const PLAYER = {
   RADIUS: 0.9,
   HEIGHT: 2.0,
-  Y: 1.0, // capsule center height
+  Y: 1.0, // entity center height
   MAX_SPEED: 13.5, // units/s at speed=100
   TURBO_MULT: 1.4,
   ACCEL: 60, // approach rate
@@ -37,12 +37,15 @@ export const RULES = {
   QUARTER_SECONDS: 120, // single-period arcade clock for the slice
 };
 
+// Low, close arcade chase cam — sits just behind/above the offense and looks
+// downfield, like a late-90s 3D football broadcast view (not top-down).
 export const CAMERA = {
-  HEIGHT: 22,
-  BACK: 26, // distance behind the focus along -Z
-  FOV: 0.8,
-  FOLLOW_LERP: 3.2, // higher = snappier
-  LOOK_AHEAD: 6, // look slightly downfield of focus
+  HEIGHT: 8.5,
+  BACK: 16, // distance behind the focus along -Z
+  FOV: 0.95,
+  FOLLOW_LERP: 4.2, // higher = snappier
+  LOOK_AHEAD: 13, // look well downfield of the focus
+  LOOK_Y: 2.4, // aim at player torsos, not the turf
   SHAKE_DECAY: 6,
 };
 
